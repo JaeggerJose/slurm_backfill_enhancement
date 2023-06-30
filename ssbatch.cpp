@@ -96,6 +96,7 @@ int make_clone_script(string filename) {
     // sbatch the cloned file
     char* command = new char[256];
     sprintf(command, "sbatch %s", cloned_file);
+    remove(cloned_file);
     FILE* pip = popen(command, "r");
     if(!pip)
        throw runtime_error("Failed to open command.");
@@ -169,6 +170,7 @@ int main(int argc, char *argv[]) {
                 if (fgets(buffer, 256, pipe) != NULL)
                     cout << buffer;
             pclose(pipe);
+        } else {
             // make this job in the queue and check the queue every 1 seconds
             char* filepath = new char [256];
             char* username = new char [256];
