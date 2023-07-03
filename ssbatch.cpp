@@ -1,8 +1,11 @@
 #include <iostream>
 #include <stdexcept> // system command execute
 #include <regex> // regular expression
+#include <queue>
+#include <vector>
 #include <string>
 #include <fstream>
+#include <unistd.h>
 
 using namespace std;
 
@@ -96,7 +99,6 @@ int make_clone_script(string filename) {
     // sbatch the cloned file
     char* command = new char[256];
     sprintf(command, "sbatch %s", cloned_file);
-    remove(cloned_file);
     FILE* pip = popen(command, "r");
     if(!pip)
        throw runtime_error("Failed to open command.");
@@ -170,17 +172,16 @@ int main(int argc, char *argv[]) {
                 if (fgets(buffer, 256, pipe) != NULL)
                     cout << buffer;
             pclose(pipe);
-        } else {
             // make this job in the queue and check the queue every 1 seconds
             char* filepath = new char [256];
             char* username = new char [256];
             username = get_user_name();
             filepath = realpath(filename.c_str(), NULL);
-            string tmp_filepath = string(filepath).substr(0, string(filepath).find_first_of('\n'));
-            string tmp_username = string(username).substr(0,  string(username).find_first_of('\n'));
-            delete[] filepath;
-            delete[] username;
-            ofstream queueFile;
+	    string tmp_filepath = string(filepath).substr(0, string(filepath).find_first_of('\n'));
+	    string tmp_username = string(username).substr(0,  string(username).find_first_of('\n'));
+	    delete[] filepath;
+	    delete[] username;
+	    ofstream queueFile;
             queueFile.open("/etc/enhancement_slurm/queue.txt", ios_base::app);
             queueFile << tmp_username << "\t" << tmp_filepath  << "\n";
             queueFile.close();
@@ -190,3 +191,4 @@ int main(int argc, char *argv[]) {
     }
     return 0;
 }
+
