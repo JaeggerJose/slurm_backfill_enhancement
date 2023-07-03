@@ -6,7 +6,7 @@
 #include <string>
 #include <fstream>
 #include <unistd.h>
-
+#include "other_file.h"
 using namespace std;
 
 char* get_start_time(int job_id) {
@@ -143,6 +143,7 @@ char* get_user_name() {
 }
 
 int main(int argc, char *argv[]) {
+    get_resource();
     string init_start_time = get_high_priority_start_time();
     int submit_job_id;
     if (argc < 2) {
