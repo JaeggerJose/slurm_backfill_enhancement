@@ -4,6 +4,7 @@
 #include <vector>
 #include <stdexcept> // system command execute
 #include <regex> // regular expression
+#include<unistd.h>
 
 using namespace std;
 class trace_queue {
@@ -29,8 +30,11 @@ class trace_queue {
         FILE* pipe = popen(command.c_str(), "r");
         if (!pipe)
             throw runtime_error("Failed to open command.");
-        if (fgets(job_id.data(), 16, pipe) == NULL)
-            throw runtime_error("No job in the queue.\n");
+        if (fgets(job_id.data(), 16, pipe) == NULL) {
+            char* new_job_id = new char [256];
+            sprintf(new_job_id, "START_DIRECTLY");
+            return new_job_id;
+        }
         string new_job_id = job_id.data();
         new_job_id.erase(0, new_job_id.find_first_not_of(' ')); // remove leading space
         return get_start_time(stoi(new_job_id));
@@ -49,7 +53,7 @@ class trace_queue {
         cloneFile << "#SBATCH --account=" << account << "\n";
         cloneFile << "#SBATCH --ntasks=" << nTasks << "\n";
         cloneFile << "#SBATCH --cpus-per-task=" << cpusPerTask << "\n";
-        cloneFile << "bash ";
+        cloneFile << "sleep 3456000";
         cloneFile.close();
         return cloneFileName;
     }
@@ -105,6 +109,7 @@ class trace_queue {
         if (fgets(job_id, 256, pip) == nullptr)
             throw runtime_error("No job in the queue.\n");
         pclose(pip);
+        cout << job_id;
         // useing regular rxpression to get the job id
         regex job_id_regex("\\d+");
         smatch match;
@@ -117,11 +122,22 @@ class trace_queue {
     void scancel_job(int job_id) {
         char* command = new char[256];
         sprintf(command, "scancel %d", job_id);
+        cout << command << endl;
         FILE* pip = popen(command, "r");
         if(!pip)
         throw runtime_error("Failed to open command.");
         pclose(pip);
         delete[] command;
+    }
+
+    void sleep_function() {
+        cout << "waiting for 1 min. for checking Slurm queue." << endl;
+        sleep(30);
+        cout << "30 seconds left." << endl;
+        sleep(20);
+        cout << "20 seconds left." << endl;
+        sleep(10);
+        return ;
     }
 
     void remove_job_from_queue(string username, string filepath) {
@@ -145,7 +161,7 @@ class trace_queue {
         remove("/etc/enhancement_slurm/queue.txt");
         rename("/etc/enhancement_slurm/temp.txt", "/etc/enhancement_slurm/queue.txt");
     }
-    
+
     public:
     void trace() {
         ifstream queueFile("/etc/enhancement_slurm/queue.txt");
@@ -161,8 +177,25 @@ class trace_queue {
                 username = line.substr(0, spacePos);
                 filepath = line.substr(spacePos + 1);
             }
+            if (init_start_time == "START_DIRECTLY") {
+                char* command = new char[256];
+                sprintf(command, "sudo -u %s sbatch %s", username.c_str(), filepath.c_str());
+                FILE* pip = popen(command, "r");
+                if(!pip)
+                throw runtime_error("Failed to open command.");
+                delete[] command;
+                // remove the job from the queuefile
+                char* output = new char [1024];
+                if (fgets(output, 1024, pip) == nullptr)
+                    throw runtime_error("Invaild User\n");
+                pclose(pip);
+                remove_job_from_queue(username, filepath);
+
+            }
+
             //step 2 clone the shell script and submit it to check the start time whether it is changed
             int new_job_id = make_clone_script(filepath);
+            sleep_function();
             string aftre_start_time = get_high_priority_start_time();
             bool start_time_is_same = aftre_start_time == init_start_time;
             scancel_job(new_job_id);
@@ -182,6 +215,8 @@ class trace_queue {
                     throw runtime_error("Invaild User\n");
                 pclose(pip);
                 remove_job_from_queue(username, filepath);
+            } else {
+                cout << filepath << "still cannot be sbatched!" << endl;
             }
 
         }
