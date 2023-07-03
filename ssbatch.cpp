@@ -1,14 +1,11 @@
 #include <iostream>
 #include <stdexcept> // system command execute
 #include <regex> // regular expression
-#include <queue>
-#include <vector>
 #include <string>
 #include <fstream>
 #include <unistd.h>
 
 using namespace std;
-
 char* get_start_time(int job_id) {
     char* command = new char[256];
     sprintf(command, "squeue -j %d --format \"%%S\" | sed -n \"2p\"", job_id);
@@ -30,8 +27,11 @@ char* get_high_priority_start_time() {
     FILE* pipe = popen(command.c_str(), "r");
     if (!pipe)
         throw runtime_error("Failed to open command.");
-    if (fgets(job_id.data(), 16, pipe) == NULL)
-        throw runtime_error("No job in the queue.\n");
+    if (fgets(job_id.data(), 16, pipe) == NULL) {
+        char* new_job_id = new char [256];
+        sprintf(new_job_id, "START_DIRECTLY");
+        return new_job_id;
+    }
     string new_job_id = job_id.data();
     new_job_id.erase(0, new_job_id.find_first_not_of(' ')); // remove leading space
     return get_start_time(stoi(new_job_id));
@@ -50,7 +50,7 @@ char* clone_file(string jobName, string mem, string gres, string partition, stri
     cloneFile << "#SBATCH --account=" << account << "\n";
     cloneFile << "#SBATCH --ntasks=" << nTasks << "\n";
     cloneFile << "#SBATCH --cpus-per-task=" << cpusPerTask << "\n";
-    cloneFile << "bash ";
+    cloneFile << "sleep 3456000";
     cloneFile.close();
     cout << cloneFileName << endl;
     return cloneFileName;
@@ -142,8 +142,18 @@ char* get_user_name() {
     return user_name;
 }
 
+void sleep_function() {
+    cout << "waiting for 1 min. for checking Slurm queue." << endl;
+    sleep(30);
+    cout << "30 seconds left." << endl;
+    sleep(20);
+    cout << "20 seconds left." << endl;
+    sleep(10);
+    return ;
+}
 int main(int argc, char *argv[]) {
-    string init_start_time = get_high_priority_start_time();
+
+
     int submit_job_id;
     if (argc < 2) {
         cout << "Usage: " << argv[0] << " <arg1> <arg2> ..." << endl;
@@ -154,9 +164,25 @@ int main(int argc, char *argv[]) {
     if (regex_search(filename, pattern)) {
         if (!fopen(argv[1], "r"))
             throw runtime_error("File didn't exist.\n");
+        string init_start_time = get_high_priority_start_time();
+        if (init_start_time == "START_DIRECTLY") {
+            char* submit_command = new char[256];
+                sprintf(submit_command, "sbatch %s", filename.c_str());
+                FILE* pipe = popen(submit_command, "r");
+                if (!pipe)
+                    throw runtime_error("Failed to open command.");
+                char buffer[256];
+                while (!feof(pipe))
+                    if (fgets(buffer, 256, pipe) != NULL)
+                        cout << buffer;
+                pclose(pipe);
+            cout << "START_DIRECTLY" << endl;
+            return 0;
+        }
         submit_job_id = make_clone_script(filename);
+        sleep_function();
         string aftre_start_time = get_high_priority_start_time();
-        cout << init_start_time << "\t" << aftre_start_time << endl;
+        cout << init_start_time.substr(0, init_start_time.find("\n")) << "\t" << aftre_start_time.substr(0, aftre_start_time.find("\n")) << endl;
         bool start_time_is_same = aftre_start_time == init_start_time;
 
         scancel_job(submit_job_id);
@@ -177,11 +203,11 @@ int main(int argc, char *argv[]) {
             char* username = new char [256];
             username = get_user_name();
             filepath = realpath(filename.c_str(), NULL);
-	    string tmp_filepath = string(filepath).substr(0, string(filepath).find_first_of('\n'));
-	    string tmp_username = string(username).substr(0,  string(username).find_first_of('\n'));
-	    delete[] filepath;
-	    delete[] username;
-	    ofstream queueFile;
+            string tmp_filepath = string(filepath).substr(0, string(filepath).find_first_of('\n'));
+            string tmp_username = string(username).substr(0,  string(username).find_first_of('\n'));
+            delete[] filepath;
+            delete[] username;
+            ofstream queueFile;
             queueFile.open("/etc/enhancement_slurm/queue.txt", ios_base::app);
             queueFile << tmp_username << "\t" << tmp_filepath  << "\n";
             queueFile.close();
@@ -191,4 +217,3 @@ int main(int argc, char *argv[]) {
     }
     return 0;
 }
-
