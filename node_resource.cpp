@@ -5,16 +5,21 @@
 #include <vector>
 #include <fstream>
 #include <unistd.h>
+#include <iomanip>
+
 #include "node_resource.h"
 using namespace std;
 
 struct resource {
-    int mem;
+    float mem;
     int cpus;
     bool gpu_full;
-    vector<string> gres;
+    vector<int> gres;
     int gpu_num;
 };
+
+resource alloc_resource;
+resource conf_resource;
 
 char* get_allocTres() {
     char* AllocTres = new char[1024];
@@ -37,28 +42,29 @@ char* get_confTres() {
         throw runtime_error("No information2\n");
     return ConfTres;
 }
-
-int get_idle_mem(string ConfTres_str, string AllocTres_str) {
+float get_idle_mem(string ConfTres_str, string AllocTres_str) {
+    regex pattern("mem=(\\d+)(M|G)");
     int ConfmemCount, AllocmemCount;
     size_t ConfmemPos = ConfTres_str.find("mem=");
     if (ConfmemPos != string::npos) {
-        string memSubstring = ConfTres_str.substr(ConfmemPos + 4);
-        size_t commaPos = memSubstring.find(",");
-        if (commaPos != string::npos) {
-            string ConfmemCountString = memSubstring.substr(0, commaPos);
-            istringstream(ConfmemCountString) >> ConfmemCount;
-        }
+	    smatch match;
+        regex_search(ConfTres_str, match, pattern);
+        if (match[2].str() == "M")
+            conf_resource.mem = stof(match[1].str()) / 1024.0;
+        else
+            conf_resource.mem = stof(match[1].str());
     }
     size_t AllocmemPos = AllocTres_str.find("mem=");
     if (AllocmemPos != string::npos) {
-        string memSubstring = AllocTres_str.substr(AllocmemPos + 4);
-        size_t commaPos = memSubstring.find(",");
-        if (commaPos != string::npos) {
-            string AllocmemCountString = memSubstring.substr(0, commaPos);
-            istringstream(AllocmemCountString) >> AllocmemCount;
-        }
+        smatch match;
+	    regex_search(AllocTres_str, match, pattern);
+        if (match[2].str() == "M")
+           alloc_resource.mem = stof(match[1].str()) / 1024.0;
+        else
+           alloc_resource.mem = stof(match[1].str());
+
     }
-    return ConfmemCount - AllocmemCount;
+    return conf_resource.mem - alloc_resource.mem;
 }
 
 int get_idle_cpus(string ConfTres_str, string AllocTres_str) {
@@ -81,49 +87,81 @@ int get_idle_cpus(string ConfTres_str, string AllocTres_str) {
             istringstream(AlloccpusCountString) >> AlloccpusCount;
         }
     }
+    conf_resource.cpus = ConfcpusCount;
+    alloc_resource.cpus = AlloccpusCount;
     return ConfcpusCount - AlloccpusCount;
 }
 
-vector<string> get_idle_gpu(string ConfTres_str, string AllocTres_str) {
-    vector<string> Conf_gpu, Alloc_gpu;
-    int Conf_gpu_num = 0, Alloc_gpu_num = 0;
-    regex pattern("gres\\/([a-zA-Z0-9:.=]+)");
-    regex num_pattern("gres/gpu=(\\d+)");
-    smatch match;
-    string::const_iterator it(ConfTres_str.cbegin());
-    string::const_iterator end(ConfTres_str.cend());
-    if(regex_search(it, end, match, num_pattern))
-	Conf_gpu_num = stoi(match[1]);
-    while (regex_search(it, end, match, pattern)) {
-        string gresString = match[1].str();
-        Conf_gpu.push_back(gresString);
-        // Advance the iterator to the next position
-        it = match.suffix().first;
+vector<int> get_idle_gpu(string ConfTres_str, string AllocTres_str) {
+    vector<int> idle_gpu;
+    if (ConfTres_str.find("gres/gpu") != string::npos) {
+        string gpu = ConfTres_str.substr(ConfTres_str.find("gres/gpu"), ConfTres_str.length() - ConfTres_str.find("gres/gpu") - 1);
+        string delimiter = ",";
+        size_t pos = 0;
+        string token;
+        vector<regex> patterns = {
+            regex("gres/gpu=(\\d+)"),
+            regex("gres/gpu:7g\\.40gb=(\\d+)"),
+            regex("gres/gpu:1g\\.5gb=(\\d+)"),
+            regex("gres/gpu:2g\\.10gb=(\\d+)"),
+            regex("gres/gpu:3g\\.20gb=(\\d+)")
+        };
+        conf_resource.gres.resize(patterns.size(),0);
+        while ((pos = gpu.find(delimiter)) != std::string::npos) {
+            token = gpu.substr(0, pos);
+            for (int i = 0; i < patterns.size(); i++) {
+                smatch match;
+                if (std::regex_search(token, match, patterns[i])) {
+                    conf_resource.gres[i] = stoi(match[1]);
+                    break;
+                }
+            }
+            gpu.erase(0, pos + delimiter.length());
+            for (int i = 0; i < patterns.size(); i++) {
+                smatch match;
+                if (regex_search(gpu, match, patterns[i])) {
+                    conf_resource.gres[i] = stoi(match[1]);
+                    break;
+                }
+            }
+        }
     }
-    string::const_iterator it2(AllocTres_str.cbegin());
-    string::const_iterator end2(AllocTres_str.cend());
-    if(regex_search(it2, end2, match, num_pattern))
-        Alloc_gpu_num = stoi(match[1]);
-    while (regex_search(it2, end2, match, pattern)) {
-        string gresString = match[1].str();
-        Alloc_gpu.push_back(gresString);
-        it2 = match.suffix().first;
+
+    if (AllocTres_str.find("gres/gpu") != string::npos) {
+        string gpu = AllocTres_str.substr(AllocTres_str.find("gres/gpu"), AllocTres_str.length() - AllocTres_str.find("gres/gpu") - 1);
+        string delimiter = ",";
+        size_t pos = 0;
+        string token;
+        vector<regex> patterns = {
+            regex("gres/gpu=(\\d+)"),
+            regex("gres/gpu:7g\\.40gb=(\\d+)"),
+            regex("gres/gpu:1g\\.5gb=(\\d+)"),
+            regex("gres/gpu:2g\\.10gb=(\\d+)"),
+            regex("gres/gpu:3g\\.20gb=(\\d+)")
+        };
+        alloc_resource.gres.resize(patterns.size(),0);
+        while ((pos = gpu.find(delimiter)) != std::string::npos) {
+            token = gpu.substr(0, pos);
+            for (int i = 0; i < patterns.size(); i++) {
+                smatch match;
+                if (std::regex_search(token, match, patterns[i])) {
+                    alloc_resource.gres[i] = stoi(match[1]);
+                    break;
+                }
+            }
+            gpu.erase(0, pos + delimiter.length());
+            for (int i = 0; i < patterns.size(); i++) {
+                smatch match;
+                if (regex_search(gpu, match, patterns[i])) {
+                    alloc_resource.gres[i] = stoi(match[1]);
+                    break;
+                }
+            }
+        }
     }
-    vector<string> idle_gpu;
-    for (int i = 0; i < Conf_gpu.size(); i++) {
-        bool flag = true;
-        for (int j = 0; j < Alloc_gpu.size(); j++)
-            if (Conf_gpu[i] == Alloc_gpu[j]) {
-		flag = false;
-                break;
-	    }
-        if (flag)
-            idle_gpu.push_back(Conf_gpu[i]);
-    }
-    char* gpu_char = new char[256];
-    sprintf(gpu_char, "gres/gpu=%d", Conf_gpu_num-Alloc_gpu_num);
-    idle_gpu[0] = gpu_char;
-    delete[] gpu_char;
+    idle_gpu.resize(5,0);
+    for(size_t i=0;i<alloc_resource.gres.size();i++)
+	idle_gpu[i] = conf_resource.gres[i] - alloc_resource.gres[i];
     return idle_gpu;
 }
 void get_idle_source(resource idle_source) {
@@ -142,9 +180,18 @@ void get_idle_source(resource idle_source) {
     idle_source.gres = get_idle_gpu(ConfTres_str, AllocTres_str);
     delete[] AllocTres;
     delete[] ConfTres;
-    cout << "Idle source:\tMemory:" << (idle_source.mem)/1024.0 << "GB\tCPU:" << idle_source.cpus << "\tGPU:";
+    cout << setw(20) << "Resource\t" << setw(12)  << "Memory(GB)" <<  setw(5) << "CPU" << setw(10) << "\tAll GPU" << setw(10) << "\tGPU-full" << setw(10) << "\tGPU-1/7" << setw(10) << "\tGPU-4/7" << setw(10) << "\tGPU-3/7"<< endl;
+    cout << setw(20) << "Configure resource:\t" << setw(12) << (conf_resource.mem)  << setw(5) << conf_resource.cpus;
+    for (int i = 0; i < conf_resource.gres.size(); i++)
+        cout << setw(10) << conf_resource.gres[i] << "\t";
+    cout << endl;
+    cout << setw(20) << "Allocated resource:\t" <<  setw(12) << (alloc_resource.mem) << setw(5) << alloc_resource.cpus;
+    for (int i = 0; i < alloc_resource.gres.size(); i++)
+        cout << setw(10) << alloc_resource.gres[i] << "\t";
+    cout << endl;
+    cout <<setw(20) << "Idle resource:\t" << setw(12) << (idle_source.mem)  << setw(5) << idle_source.cpus;
     for (int i = 0; i < idle_source.gres.size(); i++)
-        cout << idle_source.gres[i] << " ";
+        cout << setw(10) << idle_source.gres[i] << "\t";
     cout << endl;
 }
 void get_resource() {
